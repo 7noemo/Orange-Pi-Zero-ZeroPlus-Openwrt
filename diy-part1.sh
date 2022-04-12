@@ -16,8 +16,6 @@
 # Add a feed source
 #echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
-git clone https://github.com/messense/aliyundrive-fuse.git package/lean/aliyundrive-fuse
-git clone https://github.com/destan19/OpenAppFilter.git package/lean/OpenAppFilter
-git clone https://github.com/linkease/docker_ddnsto.git package/lean/ddnsto
-git clone https://github.com/HustLion/mentohust.git package/
-git clone https://github.com/KyleRicardo/MentoHUST-OpenWrt-ipk.git package/mentohust package/
+git clone https://github.com/messense/aliyundrive-fuse.git package/aliyundrive-fuse
+git clone https://github.com/destan19/OpenAppFilter.git package/OpenAppFilter
+git clone https://github.com/linkease/docker_ddnsto.git package/docker_ddnsto
