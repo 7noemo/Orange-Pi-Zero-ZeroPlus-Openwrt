@@ -1,15 +1,3 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/update-checker.yml
-# Description: Source code update checker
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-
 name: Update Checker
 
 env:
@@ -18,20 +6,22 @@ env:
 
 on:
   workflow_dispatch:
-#  schedule:
-#    - cron: 0 */18 * * *
+  schedule:
+    - cron: "0 */18 * * *"  # 每18小时检查一次
 
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-
-    - name: Get Commit Hash
+    - name: Get Commit Hash (Shallow Clone)
       id: getHash
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
+        git clone --depth 1 --filter=blob:none "$REPO_URL" -b "$REPO_BRANCH" temp_repo
+        cd temp_repo
         echo "commitHash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        cd ..
+        rm -rf temp_repo  # 清理临时文件
 
     - name: Compare Commit Hash
       id: cacheHash
@@ -39,21 +29,23 @@ jobs:
       with:
         path: .commitHash
         key: commitHash_${{ steps.getHash.outputs.commitHash }}
+        restore-keys: |
+          commitHash_
 
     - name: Save New Commit Hash
       if: steps.cacheHash.outputs.cache-hit != 'true'
       run: |
-        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+        echo "${{ steps.getHash.outputs.commitHash }}" > .commitHash
 
-    - name: Trigger build
+    - name: Trigger build (if new commit)
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.GITHUB_TOKEN }}
         event-type: Source Code Update
 
-    - name: Delete workflow runs
+    - name: Clean up old workflow runs
       uses: Mattraks/delete-workflow-runs@v2
       with:
         retain_days: 0
-        keep_minimum_runs: 2
+        keep_minimum_runs: 1  # 只保留最新的1次运行记录
