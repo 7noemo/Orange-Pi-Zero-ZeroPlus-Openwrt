@@ -87,14 +87,14 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        make download -j4 || true  # Continue even if some downloads fail
-        find dl -size -1024c -delete  # Delete incomplete/corrupted downloads
+        make download -j4 || true
+        find dl -size -1024c -delete
 
     - name: Compile the firmware (Fallback to Single Core)
       id: compile
       run: |
         cd openwrt
-        echo "Using $(nproc) cores for compilation"
+        echo "Using $(($(nproc) - 1)) cores for compilation"
         make -j$(($(nproc) - 1)) || make -j2 || make -j1 V=s
         echo "status=success" >> "$GITHUB_OUTPUT"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
@@ -105,7 +105,7 @@ jobs:
       run: df -hT
 
     - name: Upload bin directory
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -116,12 +116,12 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        rm -rf packages  # Save space by removing packages
+        rm -rf packages
         echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
         echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware directory
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -145,5 +145,5 @@ jobs:
 
     - name: Post-cleanup
       run: |
-        sudo rm -rf /workdir/openwrt/dl  # Free space after build
+        sudo rm -rf /workdir/openwrt/dl
         df -h
