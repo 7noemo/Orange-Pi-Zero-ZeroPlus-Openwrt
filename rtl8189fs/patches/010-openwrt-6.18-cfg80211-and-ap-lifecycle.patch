@@ -1,0 +1,612 @@
+diff --git a/Makefile b/Makefile
+index a08d1f6..4195e0d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -23,8 +23,6 @@ ccflags-y += -I$(src)/include
+ 
+ ccflags-y += -DCONFIG_LITTLE_ENDIAN
+ ccflags-y += -DCONFIG_IOCTL_CFG80211 -DRTW_USE_CFG80211_STA_EVENT
+-ccflags-y += -DCONFIG_CONCURRENT_MODE
+-
+ ldflags-y += --strip-debug
+ 
+ CONFIG_AUTOCFG_CP = n
+@@ -53,7 +51,7 @@
+ CONFIG_GSPI_HCI = n
+ ########################## Features ###########################
+ CONFIG_MP_INCLUDED = y
+-CONFIG_POWER_SAVING = y
++CONFIG_POWER_SAVING = n
+ CONFIG_IPS_MODE = default
+ CONFIG_LPS_MODE = default
+ CONFIG_USB_AUTOSUSPEND = n
+@@ -91,7 +89,7 @@ CONFIG_IP_R_MONITOR = n #arp VOQ and high rate
+ CONFIG_RTW_DEBUG = y
+ # default log level is _DRV_INFO_ = 4,
+ # please refer to "How_to_set_driver_debug_log_level.doc" to set the available level.
+-CONFIG_RTW_LOG_LEVEL = 4
++CONFIG_RTW_LOG_LEVEL = 2
+ 
+ # enable /proc/net/rtlxxxx/ debug interfaces
+ CONFIG_PROC_DEBUG = y
+@@ -2209,6 +2207,8 @@ MODULE_NAME := $(USER_MODULE_NAME)
+ endif
+ 
+ ccflags-y += $(USER_EXTRA_CFLAGS)
++ccflags-y := $(filter-out -DCONFIG_CONCURRENT_MODE -DCONFIG_IFACE_NUMBER=%,$(ccflags-y))
++ccflags-y += -DCONFIG_IFACE_NUMBER=1 -DCONFIG_RTW_DYNAMIC_NDEV -DRTW_SINGLE_WIPHY
+ 
+ ifneq ($(KERNELRELEASE),)
+ 
+diff --git a/os_dep/linux/ioctl_cfg80211.c b/os_dep/linux/ioctl_cfg80211.c
+index 86ff4f9..e7527a7 100644
+--- a/os_dep/linux/ioctl_cfg80211.c
++++ b/os_dep/linux/ioctl_cfg80211.c
+@@ -198,6 +198,34 @@ static struct ieee80211_channel rtw_5ghz_a_channels[MAX_CHANNEL_NUM_5G] = {
+ 	CHAN5G(165, 0),	CHAN5G(169, 0),	CHAN5G(173, 0),	CHAN5G(177, 0),
+ };
+ 
++static struct ieee80211_channel *rtw_cfg80211_get_channel(struct wiphy *wiphy, int freq)
++{
++	struct ieee80211_supported_band *sband;
++	struct ieee80211_channel *chan;
++	int band, i;
++
++	if (!wiphy || !freq)
++		return NULL;
++
++	chan = ieee80211_get_channel(wiphy, freq);
++	if (chan)
++		return chan;
++
++	for (band = 0; band < NUM_NL80211_BANDS; band++) {
++		sband = wiphy->bands[band];
++		if (!sband)
++			continue;
++
++		for (i = 0; i < sband->n_channels; i++) {
++			chan = &sband->channels[i];
++			if (chan->center_freq == freq)
++				return chan;
++		}
++	}
++
++	return NULL;
++}
++
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+ static u8 rtw_chbw_to_cfg80211_chan_def(struct wiphy *wiphy, struct cfg80211_chan_def *chdef, u8 ch, u8 bw, u8 offset, u8 ht)
+ {
+@@ -216,7 +244,7 @@ static u8 rtw_chbw_to_cfg80211_chan_def(struct wiphy *wiphy, struct cfg80211_cha
+ 	if (!cfreq)
+ 		goto exit;
+ 
+-	chan = ieee80211_get_channel(wiphy, freq);
++	chan = rtw_cfg80211_get_channel(wiphy, freq);
+ 	if (!chan)
+ 		goto exit;
+ 
+@@ -483,16 +511,18 @@ struct ieee80211_supported_band *rtw_spt_band_alloc(BAND_TYPE band)
+ 	} else
+ 		goto exit;
+ 
+-	spt_band = (struct ieee80211_supported_band *)rtw_zmalloc(
+-		sizeof(struct ieee80211_supported_band)
+-		+ sizeof(struct ieee80211_channel) * n_channels
+-		+ sizeof(struct ieee80211_rate) * n_bitrates
+-	);
++	spt_band = (struct ieee80211_supported_band *)rtw_zmalloc(sizeof(struct ieee80211_supported_band));
+ 	if (!spt_band)
+ 		goto exit;
+ 
+-	spt_band->channels = (struct ieee80211_channel *)(((u8 *)spt_band) + sizeof(struct ieee80211_supported_band));
+-	spt_band->bitrates = (struct ieee80211_rate *)(((u8 *)spt_band->channels) + sizeof(struct ieee80211_channel) * n_channels);
++	spt_band->channels = (struct ieee80211_channel *)rtw_zmalloc(sizeof(struct ieee80211_channel) * n_channels);
++	if (!spt_band->channels)
++		goto err_free_spt_band;
++
++	spt_band->bitrates = (struct ieee80211_rate *)rtw_zmalloc(sizeof(struct ieee80211_rate) * n_bitrates);
++	if (!spt_band->bitrates)
++		goto err_free_channels;
++
+ 	spt_band->band = rtw_band_to_nl80211_band(band);
+ 	spt_band->n_channels = n_channels;
+ 	spt_band->n_bitrates = n_bitrates;
+@@ -506,6 +536,13 @@ struct ieee80211_supported_band *rtw_spt_band_alloc(BAND_TYPE band)
+ 	}
+ 
+ 	/* spt_band.ht_cap */
++	goto exit;
++
++err_free_channels:
++	rtw_mfree((u8 *)spt_band->channels, sizeof(struct ieee80211_channel) * n_channels);
++err_free_spt_band:
++	rtw_mfree((u8 *)spt_band, sizeof(struct ieee80211_supported_band));
++	spt_band = NULL;
+ 
+ exit:
+ 
+@@ -514,23 +551,27 @@ exit:
+ 
+ void rtw_spt_band_free(struct ieee80211_supported_band *spt_band)
+ {
+-	u32 size = 0;
++	u32 channels_size = 0;
++	u32 rates_size = 0;
+ 
+ 	if (!spt_band)
+ 		return;
+ 
+ 	if (spt_band->band == NL80211_BAND_2GHZ) {
+-		size = sizeof(struct ieee80211_supported_band)
+-			+ sizeof(struct ieee80211_channel) * MAX_CHANNEL_NUM_2G
+-			+ sizeof(struct ieee80211_rate) * RTW_G_RATES_NUM;
++		channels_size = sizeof(struct ieee80211_channel) * MAX_CHANNEL_NUM_2G;
++		rates_size = sizeof(struct ieee80211_rate) * RTW_G_RATES_NUM;
+ 	} else if (spt_band->band == NL80211_BAND_5GHZ) {
+-		size = sizeof(struct ieee80211_supported_band)
+-			+ sizeof(struct ieee80211_channel) * MAX_CHANNEL_NUM_5G
+-			+ sizeof(struct ieee80211_rate) * RTW_A_RATES_NUM;
++		channels_size = sizeof(struct ieee80211_channel) * MAX_CHANNEL_NUM_5G;
++		rates_size = sizeof(struct ieee80211_rate) * RTW_A_RATES_NUM;
+ 	} else {
+ 
+ 	}
+-	rtw_mfree((u8 *)spt_band, size);
++
++	if (spt_band->channels && channels_size)
++		rtw_mfree((u8 *)spt_band->channels, channels_size);
++	if (spt_band->bitrates && rates_size)
++		rtw_mfree((u8 *)spt_band->bitrates, rates_size);
++	rtw_mfree((u8 *)spt_band, sizeof(struct ieee80211_supported_band));
+ }
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)) || defined(COMPAT_KERNEL_RELEASE)
+@@ -758,9 +799,17 @@ struct cfg80211_bss *rtw_cfg80211_inform_bss(_adapter *padapter, struct wlan_net
+ 	u8	bc_addr[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+ 
+ 	struct wireless_dev *wdev = padapter->rtw_wdev;
+-	struct wiphy *wiphy = wdev->wiphy;
++	struct wiphy *wiphy;
+ 	struct mlme_priv *pmlmepriv = &(padapter->mlmepriv);
+ 
++	if (!pnetwork || !pnetwork->network.IEs || pnetwork->network.IELength < _FIXED_IE_LENGTH_)
++		return NULL;
++
++	if (!wdev || !wdev->wiphy)
++		return NULL;
++
++	wiphy = wdev->wiphy;
++
+ 	pbuf = rtw_zmalloc(buf_size);
+ 	if (pbuf == NULL) {
+ 		RTW_INFO("%s pbuf allocate failed  !!\n", __FUNCTION__);
+@@ -790,7 +839,13 @@ struct cfg80211_bss *rtw_cfg80211_inform_bss(_adapter *padapter, struct wlan_net
+ 
+ 	channel = pnetwork->network.Configuration.DSConfig;
+ 	freq = rtw_ch2freq(channel);
+-	notify_channel = ieee80211_get_channel(wiphy, freq);
++	notify_channel = rtw_cfg80211_get_channel(wiphy, freq);
++	if (!notify_channel) {
++		RTW_INFO(FUNC_ADPT_FMT" skip bss "MAC_FMT" invalid channel=%u freq=%u\n",
++			FUNC_ADPT_ARG(padapter), MAC_ARG(pnetwork->network.MacAddress),
++			channel, freq);
++		goto exit;
++	}
+ 
+ 	if (0)
+ 		notify_timestamp = le64_to_cpu(*(u64 *)rtw_get_timestampe_from_ie(pnetwork->network.IEs));
+@@ -853,10 +908,19 @@ struct cfg80211_bss *rtw_cfg80211_inform_bss(_adapter *padapter, struct wlan_net
+ 		RTW_INFO("%s, got p2p_ie\n", __func__);
+ 	#endif
+ 
+-#if 1
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
++	bss = cfg80211_inform_bss(wiphy, notify_channel,
++			pnetwork->network.Reserved[0] == BSS_TYPE_BCN ?
++				CFG80211_BSS_FTYPE_BEACON : CFG80211_BSS_FTYPE_PRESP,
++			(const u8 *)pnetwork->network.MacAddress,
++			notify_timestamp, notify_capability, notify_interval,
++			notify_ie, notify_ielen, notify_signal, GFP_ATOMIC);
++#else
+ 	bss = cfg80211_inform_bss_frame(wiphy, notify_channel, (struct ieee80211_mgmt *)pbuf,
+ 					len, notify_signal, GFP_ATOMIC);
+-#else
++#endif
++
++#if 0
+ 
+ 	bss = cfg80211_inform_bss(wiphy, notify_channel, (const u8 *)pnetwork->network.MacAddress,
+ 		notify_timestamp, notify_capability, notify_interval, notify_ie,
+@@ -922,7 +986,7 @@ int rtw_cfg80211_check_bss(_adapter *padapter)
+ 		return _FALSE;
+ 
+ 	freq = rtw_ch2freq(pnetwork->Configuration.DSConfig);
+-	notify_channel = ieee80211_get_channel(padapter->rtw_wdev->wiphy, freq);
++	notify_channel = rtw_cfg80211_get_channel(padapter->rtw_wdev->wiphy, freq);
+ 	bss = cfg80211_get_bss(padapter->rtw_wdev->wiphy, notify_channel,
+ 			pnetwork->MacAddress, pnetwork->Ssid.Ssid,
+ 			pnetwork->Ssid.SsidLength,
+@@ -1000,7 +1064,7 @@ void rtw_cfg80211_ibss_indicate_connect(_adapter *padapter)
+ 	freq = rtw_ch2freq(cur_network->network.Configuration.DSConfig);
+ 	if (1)
+ 		RTW_INFO("chan: %d, freq: %d\n", cur_network->network.Configuration.DSConfig, freq);
+-	notify_channel = ieee80211_get_channel(wiphy, freq);
++	notify_channel = rtw_cfg80211_get_channel(wiphy, freq);
+ 	cfg80211_ibss_joined(padapter->pnetdev, cur_network->network.MacAddress, notify_channel, GFP_ATOMIC);
+ #else
+ 	cfg80211_ibss_joined(padapter->pnetdev, cur_network->network.MacAddress, GFP_ATOMIC);
+@@ -1087,7 +1151,7 @@ check_bss:
+ 		u16 channel = cur_network->network.Configuration.DSConfig;
+ 
+ 		freq = rtw_ch2freq(channel);
+-		notify_channel = ieee80211_get_channel(wiphy, freq);
++		notify_channel = rtw_cfg80211_get_channel(wiphy, freq);
+ 		#endif
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+@@ -2618,7 +2682,8 @@ int rtw_cfg80211_is_target_wps_scan(struct cfg80211_scan_request *scan_req, stru
+ {
+ 	int ret = 0;
+ 
+-	if (scan_req->n_ssids != 1
++	if (!scan_req || !scan_req->ssids
++		|| scan_req->n_ssids != 1
+ 		|| scan_req->ssids[0].ssid_len == 0
+ 		|| scan_req->n_channels != 1
+ 	)
+@@ -2909,7 +2974,7 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
+ 	_irqL	irqL;
+ 	u8 survey_times = 3;
+ 	u8 survey_times_for_one_ch = 6;
+-	struct cfg80211_ssid *ssids = request->ssids;
++	struct cfg80211_ssid *ssids;
+ 	int social_channel = 0, j = 0;
+ 	bool need_indicate_scan_done = _FALSE;
+ 	bool ps_denied = _FALSE;
+@@ -2922,8 +2987,19 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
+ 	struct wifidirect_info *pwdinfo;
+ #endif /* CONFIG_P2P */
+ 
++	if (!request) {
++		ret = -EINVAL;
++		goto exit;
++	}
++
++	ssids = request->ssids;
++
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
+ 	wdev = request->wdev;
++	if (!wdev) {
++		ret = -EINVAL;
++		goto exit;
++	}
+ 	#if defined(RTW_DEDICATED_P2P_DEVICE)
+ 	if (wdev == wiphy_to_pd_wdev(wiphy))
+ 		padapter = wiphy_to_adapter(wiphy);
+@@ -2944,6 +3020,11 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
+ 	wdev = ndev_to_wdev(ndev);
+ #endif
+ 
++	if (request->n_channels && !request->channels) {
++		ret = -EINVAL;
++		goto exit;
++	}
++
+ 	pwdev_priv = adapter_wdev_data(padapter);
+ 	pmlmepriv = &padapter->mlmepriv;
+ #ifdef CONFIG_P2P
+@@ -2963,11 +3044,12 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
+ 		goto bypass_p2p_chk;
+ #endif
+ #ifdef CONFIG_P2P
+-	if (pwdinfo->driver_interface == DRIVER_CFG80211) {
+-		if (request->n_ssids && ssids
+-			&& _rtw_memcmp(ssids[0].ssid, "DIRECT-", 7)
+-			&& rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)
+-		) {
++		if (pwdinfo->driver_interface == DRIVER_CFG80211) {
++			if (request->n_ssids && ssids
++				&& _rtw_memcmp(ssids[0].ssid, "DIRECT-", 7)
++				&& request->ie && request->ie_len
++				&& rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)
++			) {
+ 			if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE))
+ 				rtw_p2p_enable(padapter, P2P_ROLE_DEVICE);
+ 			else {
+@@ -2978,10 +3060,13 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
+ 			}
+ 			rtw_p2p_set_state(pwdinfo, P2P_STATE_LISTEN);
+ 
+-			if (request->n_channels == 3 &&
+-				request->channels[0]->hw_value == 1 &&
+-				request->channels[1]->hw_value == 6 &&
+-				request->channels[2]->hw_value == 11
++				if (request->n_channels == 3 &&
++					request->channels[0] &&
++					request->channels[1] &&
++					request->channels[2] &&
++					request->channels[0]->hw_value == 1 &&
++					request->channels[1]->hw_value == 6 &&
++					request->channels[2]->hw_value == 11
+ 			)
+ 				social_channel = 1;
+ 		}
+@@ -3072,11 +3157,12 @@ bypass_p2p_chk:
+ #endif
+ 
+ #ifdef CONFIG_P2P
+-	if (pwdinfo->driver_interface == DRIVER_CFG80211) {
+-		if (request->n_ssids && ssids
+-			&& _rtw_memcmp(ssids[0].ssid, "DIRECT-", 7)
+-			&& rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)
+-		) {
++		if (pwdinfo->driver_interface == DRIVER_CFG80211) {
++			if (request->n_ssids && ssids
++				&& _rtw_memcmp(ssids[0].ssid, "DIRECT-", 7)
++				&& request->ie && request->ie_len
++				&& rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)
++			) {
+ 			if (rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE))
+ 				rtw_p2p_enable(padapter, P2P_ROLE_DEVICE);
+ 			else {
+@@ -3087,10 +3173,13 @@ bypass_p2p_chk:
+ 			}
+ 			rtw_p2p_set_state(pwdinfo, P2P_STATE_LISTEN);
+ 
+-			if (request->n_channels == 3 &&
+-				request->channels[0]->hw_value == 1 &&
+-				request->channels[1]->hw_value == 6 &&
+-				request->channels[2]->hw_value == 11
++				if (request->n_channels == 3 &&
++					request->channels[0] &&
++					request->channels[1] &&
++					request->channels[2] &&
++					request->channels[0]->hw_value == 1 &&
++					request->channels[1]->hw_value == 6 &&
++					request->channels[2]->hw_value == 11
+ 			)
+ 				social_channel = 1;
+ 		}
+@@ -3207,24 +3296,32 @@ bypass_p2p_chk:
+ 	parm.ssid_num = i;
+ 
+ 	/* parsing channels, n_channels */
+-	for (i = 0; i < request->n_channels && i < RTW_CHANNEL_SCAN_AMOUNT; i++) {
++	for (i = 0, j = 0; i < request->n_channels && j < RTW_CHANNEL_SCAN_AMOUNT; i++) {
++		if (!request->channels[i])
++			continue;
+ 		#ifdef CONFIG_DEBUG_CFG80211
+ 		RTW_INFO(FUNC_ADPT_FMT CHAN_FMT"\n", FUNC_ADPT_ARG(padapter), CHAN_ARG(request->channels[i]));
+ 		#endif
+-		parm.ch[i].hw_value = request->channels[i]->hw_value;
+-		parm.ch[i].flags = request->channels[i]->flags;
++		parm.ch[j].hw_value = request->channels[i]->hw_value;
++		parm.ch[j].flags = request->channels[i]->flags;
++		j++;
++	}
++	parm.ch_num = j;
++
++	if (parm.ch_num == 0) {
++		ret = -EINVAL;
++		goto check_need_indicate_scan_done;
+ 	}
+-	parm.ch_num = i;
+ 
+-	if (request->n_channels == 1) {
++	if (parm.ch_num == 1) {
+ 		for (i = 1; i < survey_times_for_one_ch; i++)
+ 			_rtw_memcpy(&parm.ch[i], &parm.ch[0], sizeof(struct rtw_ieee80211_channel));
+ 		parm.ch_num = survey_times_for_one_ch;
+-	} else if (request->n_channels <= 4) {
+-		for (j = request->n_channels - 1; j >= 0; j--)
++	} else if (parm.ch_num <= 4) {
++		for (j = parm.ch_num - 1; j >= 0; j--)
+ 			for (i = 0; i < survey_times; i++)
+ 				_rtw_memcpy(&parm.ch[j * survey_times + i], &parm.ch[j], sizeof(struct rtw_ieee80211_channel));
+-		parm.ch_num = survey_times * request->n_channels;
++		parm.ch_num = survey_times * parm.ch_num;
+ 	}
+ 
+ 	_enter_critical_bh(&pwdev_priv->scan_req_lock, &irqL);
+@@ -4166,8 +4263,6 @@ static int cfg80211_rtw_get_txpower(struct wiphy *wiphy,
+ #endif
+ 	int *dbm)
+ {
+-	RTW_INFO("%s\n", __func__);
+-
+ 	*dbm = (12);
+ 
+ 	return 0;
+@@ -4809,6 +4904,34 @@ static int
+ #endif
+ }
+ 
++static void rtw_cfg80211_prepare_ndev_unregister(_adapter *adapter)
++{
++	struct net_device *ndev;
++
++	if (!adapter)
++		return;
++
++	ndev = adapter->pnetdev;
++	if (ndev) {
++		rtw_netif_carrier_off(ndev);
++		rtw_netif_stop_queue(ndev);
++	}
++
++	adapter->net_closed = _TRUE;
++	adapter->netif_up = _FALSE;
++
++	rtw_scan_abort(adapter);
++	rtw_cfg80211_wait_scan_req_empty(adapter, 200);
++
++#ifdef CONFIG_AP_MODE
++	if ((MLME_IS_AP(adapter) || MLME_IS_MESH(adapter)) && adapter->bup == _TRUE)
++		rtw_stop_ap_cmd(adapter, RTW_CMDF_WAIT_ACK);
++#endif
++
++	if (adapter->bup == _TRUE)
++		rtw_dev_unload(adapter);
++}
++
+ static int cfg80211_rtw_del_virtual_intf(struct wiphy *wiphy,
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
+ 	struct wireless_dev *wdev
+@@ -4838,6 +4961,7 @@ static int cfg80211_rtw_del_virtual_intf(struct wiphy *wiphy,
+ 			RTW_INFO(FUNC_NDEV_FMT" remove monitor ndev\n", FUNC_NDEV_ARG(ndev));
+ 		} else {
+ 			RTW_INFO(FUNC_NDEV_FMT" unregister ndev\n", FUNC_NDEV_ARG(ndev));
++			rtw_cfg80211_prepare_ndev_unregister(adapter);
+ 			rtw_os_ndev_unregister(adapter);
+ 		}
+ 	} else
+@@ -9766,7 +9890,7 @@ int rtw_hostapd_acs_dump_survey(struct wiphy *wiphy, struct net_device *netdev,
+ 
+ 	channel = pch_set[idx].ChannelNum;
+ 	freq = rtw_ch2freq(channel);
+-	info->channel = ieee80211_get_channel(wiphy, freq);
++	info->channel = rtw_cfg80211_get_channel(wiphy, freq);
+ 	/* RTW_INFO("%s: channel %d, freq %d\n", __func__, channel, freq); */
+ 
+ 	if (!info->channel)
+@@ -10092,6 +10216,12 @@ void rtw_wdev_unregister(struct wireless_dev *wdev)
+ 	adapter = (_adapter *)rtw_netdev_priv(ndev);
+ 	pwdev_priv = adapter_wdev_data(adapter);
+ 
++	if (adapter->ndev_unregistering) {
++		RTW_INFO("%s(wdev=%p) skip cfg80211 indications during ndev unregister\n",
++			 __func__, wdev);
++		goto unregister_monitor;
++	}
++
+ 	rtw_cfg80211_indicate_scan_done(adapter, _TRUE);
+ 
+ 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)) || defined(COMPAT_KERNEL_RELEASE)
+@@ -10105,6 +10235,7 @@ void rtw_wdev_unregister(struct wireless_dev *wdev)
+ 	}
+ 	#endif
+ 
++unregister_monitor:
+ 	if (pwdev_priv->pmon_ndev) {
+ 		RTW_INFO("%s, unregister monitor interface\n", __func__);
+ 		unregister_netdev(pwdev_priv->pmon_ndev);
+diff --git a/os_dep/linux/os_intfs.c b/os_dep/linux/os_intfs.c
+index f221460..edb8ce5 100644
+--- a/os_dep/linux/os_intfs.c
++++ b/os_dep/linux/os_intfs.c
+@@ -1844,6 +1844,10 @@ int rtw_os_ndev_register(_adapter *adapter, const char *name)
+ 
+ 	if (rtnl_lock_needed)
+ 		ret = (register_netdev(ndev) == 0) ? _SUCCESS : _FAIL;
++#if defined(CONFIG_IOCTL_CFG80211)
++	else if (ndev->ieee80211_ptr)
++		ret = (cfg80211_register_netdevice(ndev) == 0) ? _SUCCESS : _FAIL;
++#endif
+ 	else
+ 		ret = (register_netdevice(ndev) == 0) ? _SUCCESS : _FAIL;
+ 
+@@ -1855,7 +1859,7 @@ int rtw_os_ndev_register(_adapter *adapter, const char *name)
+ #if defined(CONFIG_IOCTL_CFG80211)
+ 	if (ret != _SUCCESS) {
+ 		rtw_cfg80211_ndev_res_unregister(adapter);
+-		#if !defined(RTW_SINGLE_WIPHY)
++		#if !defined(RTW_SINGLE_WIPHY) && !defined(CONFIG_RTW_DYNAMIC_NDEV)
+ 		rtw_wiphy_unregister(adapter_to_wiphy(adapter));
+ 		#endif
+ 	}
+@@ -1882,24 +1886,35 @@ void rtw_os_ndev_unregister(_adapter *adapter)
+ 	netdev = adapter->pnetdev;
+ 
+ #if defined(CONFIG_IOCTL_CFG80211)
++	RTW_INFO(FUNC_NDEV_FMT" cfg80211 ndev res unregister\n", FUNC_NDEV_ARG(netdev));
+ 	rtw_cfg80211_ndev_res_unregister(adapter);
++	RTW_INFO(FUNC_NDEV_FMT" cfg80211 ndev res unregistered\n", FUNC_NDEV_ARG(netdev));
+ #endif
+ 
+ 	if ((adapter->DriverState != DRIVER_DISAPPEAR) && netdev) {
+ 		struct dvobj_priv *dvobj = adapter_to_dvobj(adapter);
+ 		u8 rtnl_lock_needed = rtw_rtnl_lock_needed(dvobj);
+ 
++		RTW_INFO(FUNC_NDEV_FMT" unregister netdev, rtnl_lock_needed=%u\n",
++			 FUNC_NDEV_ARG(netdev), rtnl_lock_needed);
+ 		if (rtnl_lock_needed)
+ 			unregister_netdev(netdev);
++#if defined(CONFIG_IOCTL_CFG80211)
++		else if (netdev->ieee80211_ptr)
++			cfg80211_unregister_netdevice(netdev);
++#endif
+ 		else
+ 			unregister_netdevice(netdev);
++		RTW_INFO(FUNC_NDEV_FMT" netdev unregistered\n", FUNC_NDEV_ARG(netdev));
+ 	}
+ 
+-#if defined(CONFIG_IOCTL_CFG80211) && !defined(RTW_SINGLE_WIPHY)
++#if defined(CONFIG_IOCTL_CFG80211) && !defined(RTW_SINGLE_WIPHY) && !defined(CONFIG_RTW_DYNAMIC_NDEV)
+ #ifdef CONFIG_RFKILL_POLL
+ 	rtw_cfg80211_deinit_rfkill(adapter_to_wiphy(adapter));
+ #endif
++	RTW_INFO(FUNC_NDEV_FMT" wiphy unregister\n", FUNC_NDEV_ARG(netdev));
+ 	rtw_wiphy_unregister(adapter_to_wiphy(adapter));
++	RTW_INFO(FUNC_NDEV_FMT" wiphy unregistered\n", FUNC_NDEV_ARG(netdev));
+ #endif
+ 
+ #ifdef CONFIG_RTW_NAPI
+@@ -4047,6 +4062,9 @@ static int netdev_close(struct net_device *pnetdev)
+ 	else
+ 		RTW_INFO("CONFIG_BT_COEXIST: VIRTUAL_ADAPTER\n");
+ #endif /* CONFIG_BT_COEXIST_SOCKET_TRX */
++
++	if (padapter->bup == _TRUE)
++		rtw_dev_unload(padapter);
+ #else /* !CONFIG_PLATFORM_INTEL_BYT */
+ 
+ 	if (pwrctl->bInSuspend == _TRUE) {
+diff --git a/os_dep/linux/wifi_regd.c b/os_dep/linux/wifi_regd.c
+index 1ed088d..fd17dea 100644
+--- a/os_dep/linux/wifi_regd.c
++++ b/os_dep/linux/wifi_regd.c
+@@ -23,6 +23,34 @@ static struct country_code_to_enum_rd allCountries[] = {
+ 	{COUNTRY_CODE_USER, "RD"},
+ };
+ 
++static struct ieee80211_channel *rtw_regd_get_channel(struct wiphy *wiphy, int freq)
++{
++	struct ieee80211_supported_band *sband;
++	struct ieee80211_channel *ch;
++	int band, i;
++
++	if (!wiphy || !freq)
++		return NULL;
++
++	ch = ieee80211_get_channel(wiphy, freq);
++	if (ch)
++		return ch;
++
++	for (band = 0; band < NUM_NL80211_BANDS; band++) {
++		sband = wiphy->bands[band];
++		if (!sband)
++			continue;
++
++		for (i = 0; i < sband->n_channels; i++) {
++			ch = &sband->channels[i];
++			if (ch->center_freq == freq)
++				return ch;
++		}
++	}
++
++	return NULL;
++}
++
+ /*
+  * REG_RULE(freq start, freq end, bandwidth, max gain, eirp, reg_flags)
+  */
+@@ -284,7 +312,7 @@ void rtw_regd_apply_flags(struct wiphy *wiphy)
+ 		channel = channel_set[i].ChannelNum;
+ 		freq = rtw_ch2freq(channel);
+ 
+-		ch = ieee80211_get_channel(wiphy, freq);
++		ch = rtw_regd_get_channel(wiphy, freq);
+ 		if (!ch)
+ 			continue;
+ 

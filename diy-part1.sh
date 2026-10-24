@@ -19,3 +19,6 @@
 git clone --depth 1 https://github.com/messense/aliyundrive-fuse.git package/aliyundrive-fuse
 git clone --depth 1 https://github.com/destan19/OpenAppFilter.git package/OpenAppFilter
 git clone --depth 1 https://github.com/linkease/docker_ddnsto.git package/docker_ddnsto
+
+# Copy self-packaged RTL8189FS SDIO WiFi driver kmod (for Orange Pi Zero Plus)
+cp -a "$GITHUB_WORKSPACE/rtl8189fs" package/rtl8189fs
