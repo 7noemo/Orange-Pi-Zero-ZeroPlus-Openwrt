@@ -1,4 +1,4 @@
-# Orange Pi Zero / Zero Plus 2 — OpenWrt 自动云编译
+# Orange Pi Zero / Zero Plus — OpenWrt 自动云编译
 
 基于 [LEDE](https://github.com/coolsnowwolf/lede) 源码（内核 6.18），通过 GitHub Actions 自动编译香橙派 **Orange Pi Zero** 和 **Orange Pi Zero Plus** 两个型号的 OpenWrt 固件。每 18 小时自动跟随上游更新重新编译，固件发布在 [Releases](https://github.com/7noemo/Orange-Pi-Zero-ZeroPlus-Openwrt/releases)。
 
