@@ -30,7 +30,7 @@
 1. 前往 [**Releases**](https://github.com/7noemo/Orange-Pi-Zero-ZeroPlus-Openwrt/releases) 下载对应型号的 `*squashfs-sdcard.img.gz`
 2. 解压后用 **balenaEtcher / Rufus** 写入 TF 卡（或 `sudo dd if=xxx.img of=/dev/sdX bs=4M conv=fsync`）
 3. 插卡上电，网线连接，浏览器访问 `192.168.1.1`
-4. 默认用户 `root`，密码为空，登录后请立即设置密码
+4. 默认用户 `root`，密码为空或者`password`，登录后请立即设置密码
 
 ## 🔧 自定义
 
