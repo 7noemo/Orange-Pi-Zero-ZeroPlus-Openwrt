@@ -22,3 +22,9 @@ git clone --depth 1 https://github.com/linkease/docker_ddnsto.git package/docker
 
 # Copy self-packaged RTL8189FS SDIO WiFi driver kmod (for Orange Pi Zero Plus)
 cp -a "$GITHUB_WORKSPACE/rtl8189fs" package/rtl8189fs
+
+# Copy self-packaged XR819 SDIO WiFi driver kmod (for Orange Pi Zero)
+# https://github.com/7noemo/xradio-openwrt
+git clone --depth 1 https://github.com/7noemo/xradio-openwrt.git xr819-openwrt
+cp -a xr819-openwrt/xradio package/kernel/xr819
+rm -rf xr819-openwrt
