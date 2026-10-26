@@ -140,7 +140,7 @@ jobs:
         echo "DEVICE=${DEVICE}" >> "$GITHUB_ENV"
         BUILD_DATE=$(date +"%Y-%m-%d %H:%M %Z")
         cat > release.txt << EOF
-        ## OpenWrt 固件 — Orange Pi Zero Plus 2（Allwinner H5 / cortex-a53）
+        ## OpenWrt 固件 — Orange Pi Zero Plus（Allwinner H5 / cortex-a53）
 
         - **设备**：${DEVICE}
         - **源码**：[coolsnowwolf/lede](https://github.com/coolsnowwolf/lede) master @ ${SOURCE_COMMIT}
@@ -173,7 +173,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
-        name: OpenWrt Orange Pi Zero Plus 2 ${{ steps.tag.outputs.release_tag }}
+        name: OpenWrt Orange Pi Zero Plus ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
