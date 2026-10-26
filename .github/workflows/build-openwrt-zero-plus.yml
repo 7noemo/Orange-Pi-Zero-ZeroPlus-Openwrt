@@ -164,6 +164,14 @@ jobs:
 
         > 固件由 GitHub Actions 自动编译，config 全开源可查。仅供学习交流，请遵守当地法律法规。
         EOF
+        MANIFEST=$(ls openwrt/bin/targets/*/*/*.manifest 2>/dev/null | head -1 || true)
+        if [ -n "$MANIFEST" ]; then
+          if /usr/bin/grep -q 'kmod-rtl8189fs' "$MANIFEST"; then
+            printf '\n> ✅ 构建校验：manifest 中已确认 `kmod-rtl8189fs` 存在，板载 Wi-Fi 可直接使用。\n' >> release.txt
+          else
+            printf '\n> ⚠️ 构建校验：manifest 中未检出 `kmod-rtl8189fs`，板载 Wi-Fi 可能不可用，欢迎反馈。\n' >> release.txt
+          fi
+        fi
         echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to release

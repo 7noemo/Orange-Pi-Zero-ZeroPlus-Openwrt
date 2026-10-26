@@ -21,3 +21,15 @@ if [ -f target/linux/generic/hack-6.18/953-net-patch-linux-kernel-to-support-sho
 		target/linux/generic/hack-6.18/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
 	echo "953-shortcut-fe patch: replaced with 6.18.58-compatible version"
 fi
+
+# Fix LEDE's out-of-tree sun55i IOMMU driver for kernel >= 6.18.58:
+# upstream changed iommu_domain_ops.attach_dev() to take a third
+# "old domain" argument, breaking the build of arm64 sunxi targets
+# (cortexa53, i.e. Orange Pi Zero Plus).
+IOMMU_C=target/linux/sunxi/files/drivers/iommu/sun55i-iommu.c
+if [ -f "$IOMMU_C" ]; then
+	perl -0pi -e 's/(static int sun55i_iommu_attach_dev\(struct iommu_domain \*domain,\s*\n\s*struct device \*dev)\)/$1, struct iommu_domain *old)/' "$IOMMU_C"
+	if /usr/bin/grep -q 'struct device \*dev, struct iommu_domain \*old)' "$IOMMU_C"; then
+		echo "sun55i-iommu: attach_dev signature updated for kernel 6.18.58"
+	fi
+fi

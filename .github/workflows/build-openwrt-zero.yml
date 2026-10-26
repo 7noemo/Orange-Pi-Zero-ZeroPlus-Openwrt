@@ -151,10 +151,13 @@ jobs:
         2. 插卡上电，网线连接，浏览器访问 \`192.168.1.1\`（用户 \`root\`，密码为空）
         3. 首次登录后请立即修改密码
 
-        ## ⚠️ Wi-Fi 说明
+        ## 📶 Wi-Fi（板载 XR819，已内置驱动）
 
-        本设备板载 XR819 芯片**无稳定的 Linux 主线驱动**（OpenWrt 官方 wontfix），固件中不含无线驱动。
-        如需无线功能，请使用 USB Wi-Fi 网卡（RTL8188EU / MT7601U 等主线驱动齐全的型号）。
+        本固件内置自打包的 \`kmod-xradio\` 驱动（XR819 固件已打包到 \`/lib/firmware/xr819\`）+ \`wpad\` + \`iw-full\`。
+        刷机后 LuCI「网络 → 无线」直接配置 wlan0，无需额外安装任何东西（2.4G b/g/n）。
+
+        > 芯片提醒：XR819 固件质量一般（易丢帧、信号与吞吐弱于主流模组），适合轻量使用；
+        > 对性能有要求建议外接 USB Wi-Fi 网卡（RTL8188EU / MT7601U 等主线驱动齐全的型号）。
 
         ## ✅ 校验
 
@@ -162,6 +165,14 @@ jobs:
 
         > 固件由 GitHub Actions 自动编译，config 全开源可查。仅供学习交流，请遵守当地法律法规。
         EOF
+        MANIFEST=$(ls openwrt/bin/targets/*/*/*.manifest 2>/dev/null | head -1 || true)
+        if [ -n "$MANIFEST" ]; then
+          if /usr/bin/grep -q 'kmod-xradio' "$MANIFEST"; then
+            printf '\n> ✅ 构建校验：manifest 中已确认 `kmod-xradio` 存在，板载 Wi-Fi 可直接使用。\n' >> release.txt
+          else
+            printf '\n> ⚠️ 构建校验：manifest 中未检出 `kmod-xradio`，板载 Wi-Fi 可能不可用，欢迎反馈。\n' >> release.txt
+          fi
+        fi
         echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to release
