@@ -133,6 +133,37 @@ jobs:
       if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
+        SOURCE_COMMIT=$(git -C openwrt rev-parse --short HEAD)
+        KV=$(grep -m1 -E '^LINUX_VERSION-[0-9]+ ' openwrt/include/kernel-version.mk || true)
+        KERNEL_VERSION=$(echo "${KV#LINUX_VERSION-}" | awk '{print $1 $3}')
+        DEVICE="${DEVICE_NAME#_}"
+        echo "DEVICE=${DEVICE}" >> "$GITHUB_ENV"
+        BUILD_DATE=$(date +"%Y-%m-%d %H:%M %Z")
+        cat > release.txt << EOF
+        ## OpenWrt 固件 — Orange Pi Zero Plus 2（Allwinner H5 / cortex-a53）
+
+        - **设备**：${DEVICE}
+        - **源码**：[coolsnowwolf/lede](https://github.com/coolsnowwolf/lede) master @ ${SOURCE_COMMIT}
+        - **内核**：Linux ${KERNEL_VERSION}
+        - **构建时间**：${BUILD_DATE}
+
+        ## 📥 刷机
+
+        1. 下载 \`*squashfs-sdcard.img.gz\`，解压后用 balenaEtcher / Rufus 写入 TF 卡
+        2. 插卡上电，网线连接，浏览器访问 \`192.168.1.1\`（用户 \`root\`，密码为空）
+        3. 首次登录后请立即修改密码
+
+        ## 📶 Wi-Fi（板载 RTL8189FTV，开箱即用）
+
+        本固件已内置自打包的 \`kmod-rtl8189fs\` 驱动（含 6.18 内核适配补丁）+ \`wpad\`。
+        刷机后 LuCI「网络 → 无线」直接配置 wlan0，无需额外安装任何东西。
+
+        ## ✅ 校验
+
+        文件完整性请核对附件中的 \`sha256sums\`。
+
+        > 固件由 GitHub Actions 自动编译，config 全开源可查。仅供学习交流，请遵守当地法律法规。
+        EOF
         echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to release
@@ -142,6 +173,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
+        name: OpenWrt Orange Pi Zero Plus 2 ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
     - name: Post-cleanup

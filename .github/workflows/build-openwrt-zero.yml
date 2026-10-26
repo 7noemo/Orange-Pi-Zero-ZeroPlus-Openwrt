@@ -130,9 +130,39 @@ jobs:
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
+        SOURCE_COMMIT=$(git -C openwrt rev-parse --short HEAD)
+        KV=$(grep -m1 -E '^LINUX_VERSION-[0-9]+ ' openwrt/include/kernel-version.mk || true)
+        KERNEL_VERSION=$(echo "${KV#LINUX_VERSION-}" | awk '{print $1 $3}')
+        DEVICE="${DEVICE_NAME#_}"
+        echo "DEVICE=${DEVICE}" >> "$GITHUB_ENV"
+        BUILD_DATE=$(date +"%Y-%m-%d %H:%M %Z")
+        cat > release.txt << EOF
+        ## OpenWrt 固件 — Orange Pi Zero（Allwinner H2+ / cortex-a7）
+
+        - **设备**：${DEVICE}
+        - **源码**：[coolsnowwolf/lede](https://github.com/coolsnowwolf/lede) master @ ${SOURCE_COMMIT}
+        - **内核**：Linux ${KERNEL_VERSION}
+        - **构建时间**：${BUILD_DATE}
+
+        ## 📥 刷机
+
+        1. 下载 \`*squashfs-sdcard.img.gz\`，解压后用 balenaEtcher / Rufus 写入 TF 卡
+        2. 插卡上电，网线连接，浏览器访问 \`192.168.1.1\`（用户 \`root\`，密码为空）
+        3. 首次登录后请立即修改密码
+
+        ## ⚠️ Wi-Fi 说明
+
+        本设备板载 XR819 芯片**无稳定的 Linux 主线驱动**（OpenWrt 官方 wontfix），固件中不含无线驱动。
+        如需无线功能，请使用 USB Wi-Fi 网卡（RTL8188EU / MT7601U 等主线驱动齐全的型号）。
+
+        ## ✅ 校验
+
+        文件完整性请核对附件中的 \`sha256sums\`。
+
+        > 固件由 GitHub Actions 自动编译，config 全开源可查。仅供学习交流，请遵守当地法律法规。
+        EOF
+        echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v2
@@ -141,6 +171,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
+        name: OpenWrt Orange Pi Zero ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
