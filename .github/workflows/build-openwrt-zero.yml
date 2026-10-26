@@ -138,7 +138,7 @@ jobs:
         echo "DEVICE=${DEVICE}" >> "$GITHUB_ENV"
         BUILD_DATE=$(date +"%Y-%m-%d %H:%M %Z")
         cat > release.txt << EOF
-        ## OpenWrt 固件 — Orange Pi Zero（Allwinner H2+ / cortex-a7）
+        ## OpenWrt 固件 — Orange Pi Zero（Allwinner H3 / cortex-a7）
 
         - **设备**：${DEVICE}
         - **源码**：[coolsnowwolf/lede](https://github.com/coolsnowwolf/lede) master @ ${SOURCE_COMMIT}

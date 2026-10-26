@@ -8,7 +8,7 @@
 
 | 设备 | SoC | 架构 | 固件状态 | 板载 Wi-Fi |
 |---|---|---|---|---|
-| Orange Pi Zero | Allwinner H2+ | armv7 (cortex-a7) | ✅ 正常发布 | XR819 ✅ **已内置自打包 kmod-xradio 驱动**（性能较弱，见说明） |
+| Orange Pi Zero | Allwinner H3 | armv7 (cortex-a7) | ✅ 正常发布 | XR819 ✅ **已内置自打包 kmod-xradio 驱动**（性能较弱，见说明） |
 | Orange Pi Zero Plus | Allwinner H5 | aarch64 (cortex-a53) | ✅ 正常发布 | RTL8189FTV ✅ **已内置驱动，刷机即用** |
 
 ## ✨ 固件特性
