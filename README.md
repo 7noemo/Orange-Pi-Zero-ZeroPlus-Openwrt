@@ -8,13 +8,16 @@
 
 | 设备 | SoC | 架构 | 固件状态 | 板载 Wi-Fi |
 |---|---|---|---|---|
-| Orange Pi Zero | Allwinner H2+ | armv7 (cortex-a7) | ✅ 正常发布 | XR819 ❌ 无可用主线驱动，建议插 USB Wi-Fi 网卡 |
+| Orange Pi Zero | Allwinner H2+ | armv7 (cortex-a7) | ✅ 正常发布 | XR819 ✅ **已内置自打包 kmod-xradio 驱动**（性能较弱，见说明） |
 | Orange Pi Zero Plus | Allwinner H5 | aarch64 (cortex-a53) | ✅ 正常发布 | RTL8189FTV ✅ **已内置驱动，刷机即用** |
 
 ## ✨ 固件特性
 
 - **内核 6.18**，LEDE master 最新源码
-- **Zero Plus 内置 RTL8189FTV Wi-Fi 驱动**：自打包 `kmod-rtl8189fs`（源码钉死 commit + OpenWrt 6.18 适配补丁），配 `wpad` + `iw-full`，刷完 LuCI 直接配置无线
+- **两个型号的板载 Wi-Fi 都已内置驱动**：
+  - Zero（XR819）：自打包 `kmod-xradio`（[fifteenhex/xradio](https://github.com/fifteenhex/xradio) 源钉 commit + 无线固件打包到 `/lib/firmware/xr819`）
+  - Zero Plus（RTL8189FTV）：自打包 `kmod-rtl8189fs`（源码钉死 commit + OpenWrt 6.18 适配补丁）
+  - 两者都配 `wpad` + `iw-full`，刷完 LuCI 直接配置无线
 - 编译失败时不发布空 Release（固件完整性有保障）
 - 插件清单（两个型号略有差异）：
 
@@ -46,13 +49,14 @@
 ├── orange-pi-zero.config     # Zero 固件配置
 ├── orange-pi-zero-plus.config# Zero Plus 固件配置
 ├── rtl8189fs/                # 自打包 RTL8189FTV Wi-Fi 驱动（含 6.18 内核适配补丁）
+├── patches/                  # 上游补丁修复（如 6.18.58 内核的 shortcut-fe hack）
 ├── diy-part1.sh              # 构建前置脚本（拉取插件 feed / 驱动包）
-└── diy-part2.sh              # 构建后置脚本
+└── diy-part2.sh              # 构建后置脚本（应用上游补丁修复）
 ```
 
 ## ⚠️ 已知限制
 
-- **Orange Pi Zero 板载 XR819 Wi-Fi 无解**：该芯片无稳定 Linux 驱动（OpenWrt 官方 wontfix），需要无线请插 USB Wi-Fi 网卡（RTL8188EU / MT7601U 等主线驱动齐全的型号）
+- **Orange Pi Zero 的 XR819 性能较弱**：驱动可用、能开 AP/STA，但这颗芯片固件会丢帧，信号与吞吐明显弱于主流模组（驱动作者原话 "horrible at best"）。要求稳定高吞吐请插 USB Wi-Fi 网卡（RTL8188EU / MT7601U 等）
 - 因 node v24 无法在 arm 上交叉编译，固件不含依赖 node 的插件（如网易云音乐解锁）
 
 ## 🙏 致谢
