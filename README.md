@@ -18,11 +18,16 @@
   - Zero（XR819）：自打包 `kmod-xradio`（[fifteenhex/xradio](https://github.com/fifteenhex/xradio) 源钉 commit + 无线固件打包到 `/lib/firmware/xr819`）
   - Zero Plus（RTL8189FTV）：自打包 `kmod-rtl8189fs`（源码钉死 commit + OpenWrt 6.18 适配补丁）
   - 两者都配 `wpad` + `iw-full`，刷完 LuCI 直接配置无线
+- **iStoreOS 风格的新手友好体验**：
+  - **iStore 应用商店**（`luci-app-store`）：LuCI 内一键安装/卸载插件，依赖自动处理，商店保持空置、按需安装
+  - **快捷向导首页**（`luci-app-quickstart`）：网络向导 + 常用功能快捷入口，新手不碰命令行也能完成组网
+  - **默认中文界面**：LuCI 简体中文语言包开箱即用
 - 编译失败时不发布空 Release（固件完整性有保障）
 - 插件清单（两个型号略有差异）：
 
   | 类别 | 插件 |
   |---|---|
+  | 新手友好 | iStore 应用商店、快捷向导首页、中文界面 |
   | 科学上网 | OpenClash、PassWall / PassWall2（Zero）、SSR Plus+（Zero） |
   | 存储/服务 | Docker（含 Compose + LuCI 管理）、Samba、aria2 + AriaNg、硬盘休眠（hd-idle） |
   | 工具 | 广告过滤（adbyby）、磁盘管理（DiskMan）、USB 打印服务 |
