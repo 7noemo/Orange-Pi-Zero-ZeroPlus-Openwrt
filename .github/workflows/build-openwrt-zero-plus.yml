@@ -68,11 +68,8 @@ jobs:
     - name: Update feeds
       run: cd openwrt && ./scripts/feeds update -a
 
-    - name: Install feeds (Skip Optional)
-      run: |
-        cd openwrt
-        ./scripts/feeds install -a -p packages
-        ./scripts/feeds install -a -p luci
+    - name: Install feeds
+      run: cd openwrt && ./scripts/feeds install -a
 
     - name: Load custom configuration
       run: |
@@ -89,6 +86,24 @@ jobs:
         make defconfig
         make download -j4 || true
         find dl -size -1024c -delete
+
+    - name: Verify key packages in .config
+      run: |
+        cd openwrt
+        fail=0
+        for p in luci-app-store luci-app-quickstart; do
+          if grep -q "^CONFIG_PACKAGE_$p=y" .config; then
+            echo "OK: $p enabled"
+          elif grep -q "^# CONFIG_PACKAGE_$p is not set" .config; then
+            echo "FAIL: $p exists but was dropped by defconfig (unmet dependency):"
+            grep -A30 "^config PACKAGE_$p\$" tmp/.config-package.in | head -35
+            fail=1
+          else
+            echo "FAIL: $p not found in package metadata (feed not installed?)"
+            fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ] || exit 1
 
     - name: Compile the firmware (Fallback to Single Core)
       id: compile
