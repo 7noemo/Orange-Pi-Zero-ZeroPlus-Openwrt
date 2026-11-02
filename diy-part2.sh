@@ -14,22 +14,28 @@
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 #sed -i 's/luci-theme-bootstrap/luci-theme-netgear/g' feeds/luci/collections/luci/Makefile
 
-# Fix upstream Shortcut-FE patch for kernel >= 6.18.58 (stable backport
-# added __u8 tc_depth:2 after unreadable:1, breaking the hunk context)
-if [ -f target/linux/generic/hack-6.18/953-net-patch-linux-kernel-to-support-shortcut-fe.patch ]; then
+# --- Kernel 6.18 sunxi compatibility -------------------------------------
+# LEDE upstream now maintains BOTH patches itself (refreshed 2026-11-02 for
+# kernel 6.18.60):
+#   generic/hack-6.18/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
+#   sunxi/patches-6.18/950-iommu-sun55i-update-attach-dev-for-linux-6.18.patch
+# Our local overrides now DUPLICATE the upstream fixes: the perl edit below
+# changed the attach_dev signature before the 950 patch could apply, so
+# "Hunk #1 FAILED at 711" killed the whole build. Only fall back to the local
+# hacks when upstream stops shipping the corresponding patch.
+
+# Shortcut-FE skbuff.h hunk (fallback only)
+if [ ! -f target/linux/generic/hack-6.18/953-net-patch-linux-kernel-to-support-shortcut-fe.patch ]; then
 	cp "$GITHUB_WORKSPACE/patches/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
 		target/linux/generic/hack-6.18/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
-	echo "953-shortcut-fe patch: replaced with 6.18.58-compatible version"
+	echo "953-shortcut-fe: upstream patch missing, installed local fallback"
 fi
 
-# Fix LEDE's out-of-tree sun55i IOMMU driver for kernel >= 6.18.58:
-# upstream changed iommu_domain_ops.attach_dev() to take a third
-# "old domain" argument, breaking the build of arm64 sunxi targets
-# (cortexa53, i.e. Orange Pi Zero Plus).
+# sun55i IOMMU attach_dev() third argument (fallback only)
 IOMMU_C=target/linux/sunxi/files/drivers/iommu/sun55i-iommu.c
-if [ -f "$IOMMU_C" ]; then
+if [ -f "$IOMMU_C" ] && ! ls target/linux/sunxi/patches-6.18/950-iommu-sun55i-*.patch >/dev/null 2>&1; then
 	perl -0pi -e 's/(static int sun55i_iommu_attach_dev\(struct iommu_domain \*domain,\s*\n\s*struct device \*dev)\)/$1, struct iommu_domain *old)/' "$IOMMU_C"
 	if /usr/bin/grep -q 'struct device \*dev, struct iommu_domain \*old)' "$IOMMU_C"; then
-		echo "sun55i-iommu: attach_dev signature updated for kernel 6.18.58"
+		echo "sun55i-iommu: upstream 950 patch missing, applied local signature fix"
 	fi
 fi
