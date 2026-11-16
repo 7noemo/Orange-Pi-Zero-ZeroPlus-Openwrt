@@ -39,3 +39,30 @@ if [ -f "$IOMMU_C" ] && ! ls target/linux/sunxi/patches-6.18/950-iommu-sun55i-*.
 		echo "sun55i-iommu: upstream 950 patch missing, applied local signature fix"
 	fi
 fi
+
+# --- gettext-full host build fix (LEDE issue #14291) ----------------------
+# LEDE master pairs gettext-full 0.22.5 (2023) with tools/gnulib 2026.07;
+# gettext's bundled autogen breaks against the new gnulib-tool and the host
+# build dies at Host/Prepare ("Replacing file ..." then Error 1).
+# OpenWrt solved this by moving to gettext 0.24.2 + a separate gnulib-l10n
+# host package. Pull both from OpenWrt master. Guarded on the stale version:
+# auto-skips once LEDE catches up.
+if grep -q 'PKG_VERSION:=0.22.5' package/libs/gettext-full/Makefile 2>/dev/null; then
+	rm -rf /tmp/owrt-pkgs
+	git clone --depth 1 --filter=blob:none --sparse \
+		https://github.com/openwrt/openwrt /tmp/owrt-pkgs >/dev/null 2>&1
+	git -C /tmp/owrt-pkgs sparse-checkout set \
+		package/libs/gettext-full package/libs/gnulib-l10n >/dev/null 2>&1
+	if [ -f /tmp/owrt-pkgs/package/libs/gettext-full/Makefile ] && \
+	   grep -q 'PKG_VERSION:=0.24.2' /tmp/owrt-pkgs/package/libs/gettext-full/Makefile; then
+		rm -rf package/libs/gettext-full
+		cp -r /tmp/owrt-pkgs/package/libs/gettext-full package/libs/
+		cp -r /tmp/owrt-pkgs/package/libs/gnulib-l10n package/libs/
+		echo "gettext-full: replaced with OpenWrt 0.24.2 + gnulib-l10n (fixes host build, LEDE#14291)"
+	else
+		echo "::warning::failed to fetch OpenWrt gettext-full/gnulib-l10n - keeping LEDE version (host build may fail)"
+	fi
+	rm -rf /tmp/owrt-pkgs
+else
+	echo "gettext-full: no longer 0.22.5 (LEDE caught up?) - skipping"
+fi
