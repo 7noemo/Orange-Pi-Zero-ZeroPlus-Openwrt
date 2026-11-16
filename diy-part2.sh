@@ -66,3 +66,27 @@ if grep -q 'PKG_VERSION:=0.22.5' package/libs/gettext-full/Makefile 2>/dev/null;
 else
 	echo "gettext-full: no longer 0.22.5 (LEDE caught up?) - skipping"
 fi
+
+# --- erofs-utils source repoint (kernel.org unreachable from runners) -----
+# LEDE fetches the 1.8.10 cgit snapshot tarball from git.kernel.org, which
+# has been timing out from GitHub Actions runners (port 443), and OpenWrt
+# mirrors never carry LEDE's version => tools download fails.
+# The official GitHub mirror tag archive is byte-identical (same sha256:
+# 05eb4ede...), so only URL + filename need to change. Guarded: skips once
+# LEDE changes version/URL (e.g. adopts git proto like OpenWrt master).
+if [ -f tools/erofs-utils/Makefile ] && \
+   grep -q 'PKG_VERSION:=1.8.10' tools/erofs-utils/Makefile && \
+   grep -q 'git.kernel.org' tools/erofs-utils/Makefile; then
+	sed -i \
+		-e 's|PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz|PKG_SOURCE:=v$(PKG_VERSION).tar.gz|' \
+		-e 's|PKG_SOURCE_URL=https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git/snapshot/|PKG_SOURCE_URL=https://github.com/erofs/erofs-utils/archive/refs/tags/|' \
+		tools/erofs-utils/Makefile
+	if grep -q 'github.com/erofs/erofs-utils' tools/erofs-utils/Makefile; then
+		echo "erofs-utils: repointed source to GitHub mirror tag archive (same tarball hash)"
+	else
+		echo "::error::erofs-utils repoint failed - pattern mismatch, update diy-part2.sh"
+		exit 1
+	fi
+else
+	echo "erofs-utils: not kernel.org/1.8.10 anymore (LEDE caught up?) - skipping"
+fi
