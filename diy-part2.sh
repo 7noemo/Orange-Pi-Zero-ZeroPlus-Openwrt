@@ -14,6 +14,27 @@
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 #sed -i 's/luci-theme-bootstrap/luci-theme-netgear/g' feeds/luci/collections/luci/Makefile
 
+# --- LuCI feed integrity guard (fail fast) --------------------------------
+# coolsnowwolf/luci d341231 (2026-11-17, "Remove packages provided by QWRT
+# core") deleted modules/luci-mod-network, but luci-mod-admin-full still
+# declares +luci-mod-network. LEDE ships no core replacement, so feeds
+# install only prints a warning and the build dies ~2.5 hours later at
+# package/install: "cannot find dependency luci-mod-network for
+# luci-mod-admin-full" -> "Cannot install package luci".
+# Upstream restored it in 14761f2 (2026-11-18). Detect this exact breakage
+# before defconfig so a temporarily broken upstream feed cannot waste a full
+# compile. The dependency check makes the guard auto-retire if upstream ever
+# legitimately removes the module.
+LUCI_FEED=feeds/luci
+if grep -q 'luci-mod-network' "$LUCI_FEED/modules/luci-mod-admin-full/Makefile" 2>/dev/null && \
+   [ ! -f "$LUCI_FEED/modules/luci-mod-network/Makefile" ]; then
+	echo "::error::LuCI feed is missing luci-mod-network but luci-mod-admin-full depends on it."
+	echo "::error::Upstream coolsnowwolf/luci regression (d341231, restored in 14761f2)."
+	echo "::error::Wait for the feed to recover, or pin the luci feed to a known-good commit."
+	exit 1
+fi
+echo "luci feed integrity: luci-mod-network present (or no longer required)"
+
 # --- Kernel 6.18 sunxi compatibility -------------------------------------
 # LEDE upstream now maintains BOTH patches itself (refreshed 2026-11-02 for
 # kernel 6.18.60):
