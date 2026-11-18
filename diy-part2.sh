@@ -35,6 +35,46 @@ if grep -q 'luci-mod-network' "$LUCI_FEED/modules/luci-mod-admin-full/Makefile" 
 fi
 echo "luci feed integrity: luci-mod-network present (or no longer required)"
 
+# --- profiles.json generation fix (LEDE verbose.mk b77bd85b1) ------------
+# LEDE 2026-11-18 commit b77bd85b1 ("build: preserve diagnostics when
+# verbose descriptors are closed") added `$(info $(_MESSAGE))` to
+# include/verbose.mk, which leaks a parse-time status line onto stdout.
+# scripts/json_overview_image_info.py calls
+#   make ... val.DEFAULT_PACKAGES val.ARCH_PACKAGES
+# and unpacks stdout into exactly two values, so the extra line causes
+# "ValueError: too many values to unpack (expected 2)" at the very end of
+# the build (images are already built; only profiles.json fails).
+# Keep the LAST two non-empty lines, which are always the variable values.
+# Guarded on the original statement so it auto-retires if upstream fixes it.
+JSON_INFO=scripts/json_overview_image_info.py
+if [ -f "$JSON_INFO" ] && \
+   grep -q 'default_packages, output\["arch_packages"\] = run(' "$JSON_INFO"; then
+	python3 - "$JSON_INFO" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old1 = '    default_packages, output["arch_packages"] = run('
+new1 = '    _val_lines = run('
+assert old1 in s, "pattern 1 missing"
+s = s.replace(old1, new1, 1)
+old2 = '    ).stdout.splitlines()\n\n    output["default_packages"] = sorted(default_packages.split())'
+new2 = '''    ).stdout.splitlines()
+
+    # LEDE include/verbose.mk (b77bd85b1) emits a parse-time status line on
+    # stdout, so the two val.* values are the LAST two non-empty lines.
+    _val_lines = [line for line in _val_lines if line.strip()]
+    default_packages, output["arch_packages"] = _val_lines[-2], _val_lines[-1]
+
+    output["default_packages"] = sorted(default_packages.split())'''
+assert old2 in s, "pattern 2 missing"
+s = s.replace(old2, new2, 1)
+open(p, "w").write(s)
+PY
+	echo "json_overview_image_info.py: tolerate extra stdout diagnostics (profiles.json)"
+else
+	echo "json_overview_image_info.py: pattern changed (upstream fixed?) - skipping"
+fi
+
 # --- Kernel 6.18 sunxi compatibility -------------------------------------
 # LEDE upstream now maintains BOTH patches itself (refreshed 2026-11-02 for
 # kernel 6.18.60):
